@@ -551,23 +551,24 @@ static bool cmd_resize_tiling_width_height(I3_CMD, Con *current, const char *dir
         ppt = new_current_percent - current->percent;
     }
     subtract_percent = ppt / (children - 1);
+    if (ppt < 0.0 && new_current_percent < percent_for_1px(current)) {
+        yerror("Not resizing, container would end with less than 1px\n");
+        return false;
+    }
 
     LOG("new_current_percent = %f\n", new_current_percent);
     LOG("subtract_percent = %f\n", subtract_percent);
     /* Ensure that the new percentages are positive. */
-    TAILQ_FOREACH(child, &(current->parent->nodes_head), nodes) {
-        if (child == current)
-            continue;
-        if (child->percent - subtract_percent <= 0.0) {
-            LOG("Not resizing, already at minimum size (child %p would end up with a size of %.f\n", child, child->percent - subtract_percent);
-            ysuccess(false);
-            return false;
+    if (subtract_percent >= 0.0) {
+        TAILQ_FOREACH(child, &(current->parent->nodes_head), nodes) {
+            if (child == current) {
+                continue;
+            }
+            if (child->percent - subtract_percent < percent_for_1px(child)) {
+                yerror("Not resizing, already at minimum size (child %p would end up with a size of %.f\n", child, child->percent - subtract_percent);
+                return false;
+            }
         }
-    }
-    if (new_current_percent <= 0.0) {
-        LOG("Not resizing, already at minimum size\n");
-        ysuccess(false);
-        return false;
     }
 
     current->percent = new_current_percent;
@@ -694,13 +695,15 @@ void cmd_resize_set(I3_CMD, long cwidth, const char *mode_width, long cheight, c
                 continue;
             }
 
-            if (cwidth > 0 && mode_width) {
+            if (cwidth > 0) {
+                bool is_ppt = mode_width && strcmp(mode_width, "ppt") == 0;
                 success &= resize_set_tiling(current_match, cmd_output, current->con,
-                                             HORIZ, strcmp(mode_width, "ppt") == 0, cwidth);
+                                             HORIZ, is_ppt, cwidth);
             }
-            if (cheight > 0 && mode_height) {
+            if (cheight > 0) {
+                bool is_ppt = mode_height && strcmp(mode_height, "ppt") == 0;
                 success &= resize_set_tiling(current_match, cmd_output, current->con,
-                                             VERT, strcmp(mode_height, "ppt") == 0, cheight);
+                                             VERT, is_ppt, cheight);
             }
         }
     }
@@ -2002,6 +2005,7 @@ void cmd_rename_workspace(I3_CMD, const char *old_name, const char *new_name) {
     Con *parent = workspace->parent;
     con_detach(workspace);
     con_attach(workspace, parent, false);
+    ipc_send_workspace_event("rename", workspace, NULL);
 
     /* Move the workspace to the correct output if it has an assignment */
     struct Workspace_Assignment *assignment = NULL;
@@ -2046,7 +2050,6 @@ void cmd_rename_workspace(I3_CMD, const char *old_name, const char *new_name) {
     cmd_output->needs_tree_render = true;
     ysuccess(true);
 
-    ipc_send_workspace_event("rename", workspace, NULL);
     ewmh_update_desktop_names();
     ewmh_update_desktop_viewport();
     ewmh_update_current_desktop();
