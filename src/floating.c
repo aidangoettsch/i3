@@ -59,7 +59,7 @@ static void floating_set_hint_atom(Con *con, bool floating) {
     xcb_flush(conn);
 }
 
-/**
+/*
  * Called when a floating window is created or resized.
  * This function resizes the window if its size is higher or lower than the
  * configured maximum/minimum size, respectively.
@@ -93,6 +93,18 @@ void floating_check_size(Con *floating_con) {
         if (focused_con->window->min_height) {
             floating_con->rect.height -= border_rect.height;
             floating_con->rect.height = max(floating_con->rect.height, focused_con->window->min_height);
+            floating_con->rect.height += border_rect.height;
+        }
+
+        if (focused_con->window->max_width) {
+            floating_con->rect.width -= border_rect.width;
+            floating_con->rect.width = min(floating_con->rect.width, focused_con->window->max_width);
+            floating_con->rect.width += border_rect.width;
+        }
+
+        if (focused_con->window->max_height) {
+            floating_con->rect.height -= border_rect.height;
+            floating_con->rect.height = min(floating_con->rect.height, focused_con->window->max_height);
             floating_con->rect.height += border_rect.height;
         }
 
@@ -246,7 +258,7 @@ void floating_enable(Con *con, bool automatic) {
         Con *parent = con->parent;
         /* clear the pointer before calling tree_close_internal in which the memory is freed */
         con->parent = NULL;
-        tree_close_internal(parent, DONT_KILL_WINDOW, false, false);
+        tree_close_internal(parent, DONT_KILL_WINDOW, false);
     }
 
     char *name;
@@ -376,7 +388,7 @@ void floating_disable(Con *con, bool automatic) {
         Con *parent = con->parent;
         con_detach(con);
         con->parent = NULL;
-        tree_close_internal(parent, DONT_KILL_WINDOW, true, false);
+        tree_close_internal(parent, DONT_KILL_WINDOW, true);
         con_attach(con, tiling_focused, false);
         con->percent = 0.0;
         con_fix_percent(con->parent);
@@ -887,13 +899,17 @@ bool floating_reposition(Con *con, Rect newrect) {
 
     con->rect = newrect;
 
-    floating_maybe_reassign_ws(con);
+    bool reassigned = floating_maybe_reassign_ws(con);
 
     /* If this is a scratchpad window, don't auto center it from now on. */
     if (con->scratchpad_state == SCRATCHPAD_FRESH)
         con->scratchpad_state = SCRATCHPAD_CHANGED;
 
-    tree_render();
+    /* Workspace change will already result in a tree_render. */
+    if (!reassigned) {
+        render_con(con, false, true);
+        x_push_node(con);
+    }
     return true;
 }
 

@@ -494,7 +494,7 @@ static void handle_unmap_notify_event(xcb_unmap_notify_event_t *event) {
     xcb_delete_property(conn, event->window, A__NET_WM_DESKTOP);
     xcb_delete_property(conn, event->window, A__NET_WM_STATE);
 
-    tree_close_internal(con, DONT_KILL_WINDOW, false, false);
+    tree_close_internal(con, DONT_KILL_WINDOW, false);
     tree_render();
 
 ignore_end:
@@ -806,6 +806,18 @@ static void handle_client_message(xcb_client_message_event_t *event) {
             XCB_ATOM_CARDINAL, 32, 4,
             &r);
         xcb_flush(conn);
+    } else if (event->type == A_WM_CHANGE_STATE) {
+        /* http://tronche.com/gui/x/icccm/sec-4.html#s-4.1.4 */
+        if (event->data.data32[0] == XCB_ICCCM_WM_STATE_ICONIC) {
+            /* For compatiblity reasons, Wine will request iconic state and cannot ensure that the WM has agreed on it;
+             * immediately revert to normal to avoid being stuck in a paused state. */
+            DLOG("Client has requested iconic state, rejecting. (window = %d)\n", event->window);
+            long data[] = {XCB_ICCCM_WM_STATE_NORMAL, XCB_NONE};
+            xcb_change_property(conn, XCB_PROP_MODE_REPLACE, event->window,
+                                A_WM_STATE, A_WM_STATE, 32, 2, data);
+        } else {
+            DLOG("Not handling WM_CHANGE_STATE request. (window = %d, state = %d)\n", event->window, event->data.data32[0]);
+        }
     } else if (event->type == A__NET_CURRENT_DESKTOP) {
         /* This request is used by pagers and bars to change the current
          * desktop likely as a result of some user action. We interpret this as
@@ -867,7 +879,7 @@ static void handle_client_message(xcb_client_message_event_t *event) {
             if (event->data.data32[0])
                 last_timestamp = event->data.data32[0];
 
-            tree_close_internal(con, KILL_WINDOW, false, false);
+            tree_close_internal(con, KILL_WINDOW, false);
             tree_render();
         } else {
             DLOG("Couldn't find con for _NET_CLOSE_WINDOW request. (window = %d)\n", event->window);
@@ -937,8 +949,8 @@ static void handle_client_message(xcb_client_message_event_t *event) {
     }
 }
 
-bool handle_window_type(void *data, xcb_connection_t *conn, uint8_t state, xcb_window_t window,
-                        xcb_atom_t atom, xcb_get_property_reply_t *reply) {
+static bool handle_window_type(void *data, xcb_connection_t *conn, uint8_t state, xcb_window_t window,
+                               xcb_atom_t atom, xcb_get_property_reply_t *reply) {
     Con *con;
     if ((con = con_by_window_id(window)) == NULL || con->window == NULL)
         return false;
@@ -981,9 +993,18 @@ static bool handle_normal_hints(void *data, xcb_connection_t *conn, uint8_t stat
         con->window->min_height = size_hints.min_height;
     }
 
+    if ((size_hints.flags & XCB_ICCCM_SIZE_HINT_P_MAX_SIZE)) {
+        DLOG("Maximum size: %d (width) x %d (height)\n", size_hints.max_width, size_hints.max_height);
+
+        con->window->max_width = size_hints.max_width;
+        con->window->max_height = size_hints.max_height;
+    }
+
     if (con_is_floating(con)) {
         win_width = MAX(win_width, con->window->min_width);
         win_height = MAX(win_height, con->window->min_height);
+        win_width = MIN(win_width, con->window->max_width);
+        win_height = MIN(win_height, con->window->max_height);
     }
 
     bool changed = false;
@@ -1051,7 +1072,7 @@ static bool handle_normal_hints(void *data, xcb_connection_t *conn, uint8_t stat
 
     /* Convert numerator/denominator to a double */
     double min_aspect = (double)size_hints.min_aspect_num / size_hints.min_aspect_den;
-    double max_aspect = (double)size_hints.max_aspect_num / size_hints.min_aspect_den;
+    double max_aspect = (double)size_hints.max_aspect_num / size_hints.max_aspect_den;
 
     DLOG("Aspect ratio set: minimum %f, maximum %f\n", min_aspect, max_aspect);
     DLOG("width = %f, height = %f\n", width, height);

@@ -550,7 +550,7 @@ static void output_change_mode(xcb_connection_t *conn, Output *output) {
     }
 
     /* If default_orientation is NO_ORIENTATION, we change the orientation of
-     * the workspaces and their childs depending on output resolution. This is
+     * the workspaces and their children depending on output resolution. This is
      * only done for workspaces with maximum one child. */
     if (config.default_orientation == NO_ORIENTATION) {
         TAILQ_FOREACH(workspace, &(content->nodes_head), nodes) {
@@ -993,7 +993,7 @@ void randr_disable_output(Output *output) {
             if (current != next && TAILQ_EMPTY(&(current->focus_head))) {
                 /* the workspace is empty and not focused, get rid of it */
                 DLOG("Getting rid of current = %p / %s (empty, unfocused)\n", current, current->name);
-                tree_close_internal(current, DONT_KILL_WINDOW, false, false);
+                tree_close_internal(current, DONT_KILL_WINDOW, false);
                 continue;
             }
             DLOG("Detaching current = %p / %s\n", current, current->name);
@@ -1039,7 +1039,7 @@ void randr_disable_output(Output *output) {
         Con *con = output->con;
         /* clear the pointer before calling tree_close_internal in which the memory is freed */
         output->con = NULL;
-        tree_close_internal(con, DONT_KILL_WINDOW, true, false);
+        tree_close_internal(con, DONT_KILL_WINDOW, true);
         DLOG("Done. Should be fine now\n");
     }
 

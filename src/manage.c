@@ -246,17 +246,13 @@ void manage_window(xcb_window_t window, xcb_get_window_attributes_cookie_t cooki
 
     DLOG("Initial geometry: (%d, %d, %d, %d)\n", geom->x, geom->y, geom->width, geom->height);
 
-    Con *nc = NULL;
-    Match *match = NULL;
-    Assignment *assignment;
-
-    /* TODO: two matches for one container */
-
     /* See if any container swallows this new window */
-    nc = con_for_window(search_at, cwindow, &match);
+    Match *match = NULL;
+    Con *nc = con_for_window(search_at, cwindow, &match);
     const bool match_from_restart_mode = (match && match->restart_mode);
     if (nc == NULL) {
         Con *wm_desktop_ws = NULL;
+        Assignment *assignment;
 
         /* If not, check if it is assigned to a specific workspace */
         if ((assignment = assignment_for(cwindow, A_TO_WORKSPACE)) ||
@@ -518,6 +514,12 @@ void manage_window(xcb_window_t window, xcb_get_window_attributes_cookie_t cooki
         DLOG("Window specifies minimum size %d x %d\n", wm_size_hints.min_width, wm_size_hints.min_height);
         nc->window->min_width = wm_size_hints.min_width;
         nc->window->min_height = wm_size_hints.min_height;
+    }
+
+    if (wm_size_hints.flags & XCB_ICCCM_SIZE_HINT_P_MAX_SIZE) {
+        DLOG("Window specifies maximum size %d x %d\n", wm_size_hints.max_width, wm_size_hints.max_height);
+        nc->window->max_width = wm_size_hints.max_width;
+        nc->window->max_height = wm_size_hints.max_height;
     }
 
     /* Store the requested geometry. The width/height gets raised to at least

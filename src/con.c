@@ -286,14 +286,14 @@ void con_close(Con *con, kill_window_t kill_window) {
         for (child = TAILQ_FIRST(&(con->focus_head)); child;) {
             nextchild = TAILQ_NEXT(child, focused);
             DLOG("killing child = %p.\n", child);
-            tree_close_internal(child, kill_window, false, false);
+            tree_close_internal(child, kill_window, false);
             child = nextchild;
         }
 
         return;
     }
 
-    tree_close_internal(con, kill_window, false, false);
+    tree_close_internal(con, kill_window, false);
 }
 
 /*
@@ -312,7 +312,7 @@ bool con_has_managed_window(Con *con) {
     return (con != NULL && con->window != NULL && con->window->id != XCB_WINDOW_NONE && con_get_workspace(con) != NULL);
 }
 
-/**
+/*
  * Returns true if this node has regular or floating children.
  *
  */
@@ -526,7 +526,7 @@ Con *con_get_fullscreen_covering_ws(Con *ws) {
     return fs;
 }
 
-/**
+/*
  * Returns true if the container is internal, such as __i3_scratch
  *
  */
@@ -896,7 +896,7 @@ int con_num_children(Con *con) {
     return children;
 }
 
-/**
+/*
  * Returns the number of visible non-floating children of this container.
  * For example, if the container contains a hsplit which has two children,
  * this will return 2 instead of 1.
@@ -933,6 +933,10 @@ int con_num_windows(Con *con) {
     int num = 0;
     Con *current = NULL;
     TAILQ_FOREACH(current, &(con->nodes_head), nodes) {
+        num += con_num_windows(current);
+    }
+
+    TAILQ_FOREACH(current, &(con->floating_head), floating_windows) {
         num += con_num_windows(current);
     }
 
@@ -1171,13 +1175,13 @@ static bool _con_move_to_con(Con *con, Con *target, bool behind_focused, bool fi
         target = target->parent;
     }
 
-    /* 3: if the target container is floating, we get the workspace instead.
-     * Only tiling windows need to get inserted next to the current container.
-     * */
-    Con *floatingcon = con_inside_floating(target);
-    if (floatingcon != NULL) {
+    /* 3: if the original target is the direct child of a floating container, we
+     * can't move con next to it - floating containers have only one child - so
+     * we get the workspace instead. */
+    if (target->type == CT_FLOATING_CON) {
         DLOG("floatingcon, going up even further\n");
-        target = floatingcon->parent;
+        orig_target = target;
+        target = target->parent;
     }
 
     if (con->type == CT_FLOATING_CON) {
@@ -1453,6 +1457,9 @@ Con *con_next_focused(Con *con) {
     if (con->parent->type == CT_DOCKAREA) {
         DLOG("selecting workspace for dock client\n");
         return con_descend_focused(output_get_content(con->parent->parent));
+    }
+    if (con_is_floating(con)) {
+        con = con->parent;
     }
 
     /* if 'con' is not the first entry in the focus stack, use the first one as
@@ -1986,7 +1993,7 @@ static void con_on_remove_child(Con *con) {
         if (TAILQ_EMPTY(&(con->focus_head)) && !workspace_is_visible(con)) {
             LOG("Closing old workspace (%p / %s), it is empty\n", con, con->name);
             yajl_gen gen = ipc_marshal_workspace_event("empty", con, NULL);
-            tree_close_internal(con, DONT_KILL_WINDOW, false, false);
+            tree_close_internal(con, DONT_KILL_WINDOW, false);
 
             const unsigned char *payload;
             ylength length;
@@ -2007,7 +2014,7 @@ static void con_on_remove_child(Con *con) {
     int children = con_num_children(con);
     if (children == 0) {
         DLOG("Container empty, closing\n");
-        tree_close_internal(con, DONT_KILL_WINDOW, false, false);
+        tree_close_internal(con, DONT_KILL_WINDOW, false);
         return;
     }
 }
@@ -2287,6 +2294,12 @@ gaps_t calculate_effective_gaps(Con *con) {
     Con *workspace = con_get_workspace(con);
     if (workspace == NULL || (config.smart_gaps && con_num_visible_children(workspace) <= 1))
         return (gaps_t){0, 0, 0, 0, 0};
+
+    // if all visible children are in one tabbed container, disable gaps
+    if (config.smart_gaps && con_num_children(workspace) == 1 &&
+        (TAILQ_FIRST(&(workspace->nodes_head))->layout == L_TABBED ||
+         TAILQ_FIRST(&(workspace->nodes_head))->layout == L_STACKED))
+        return (gaps_t){0, 0};
 
     gaps_t gaps = {
         .inner = (workspace->gaps.inner + config.gaps.inner) / 2,
